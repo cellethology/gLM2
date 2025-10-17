@@ -1,6 +1,6 @@
 import torch
 from transformers import AutoModel, AutoTokenizer
-model = AutoModel.from_pretrained('tattabio/gLM2_650M', torch_dtype=torch.bfloat16, trust_remote_code=True).cuda()
+model = AutoModel.from_pretrained('tattabio/gLM2_650M', dtype=torch.bfloat16, trust_remote_code=True).cuda()
 tokenizer = AutoTokenizer.from_pretrained('tattabio/gLM2_650M', trust_remote_code=True)
 
 # A contig with two proteins and an inter-genic sequence.
