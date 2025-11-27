@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 # Validation constants
 MIN_SEQUENCE_LENGTH: int = 1
 MAX_SEQUENCE_LENGTH: int = 4096  # Model context length limit
-# Valid amino acid characters (uppercase, including ambiguous)
+# Valid amino acid characters (uppercase, including ambiguous IUPAC extended code https://www.bioinformatics.org/sms/iupac.html) 
 VALID_AA_CHARS: Set[str] = set("ACDEFGHIKLMNPQRSTVWYBJOUXZ")
 # Valid nucleotide characters (lowercase, including ambiguous)
 VALID_NUC_CHARS: Set[str] = set("atgcn")
