@@ -467,16 +467,6 @@ wheels = [
 ]
 
 [[package]]
-name = "cupy"
-version = "13.6.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "fastrlock" },
-    { name = "numpy" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/a7/95/c2c7b5dca22dd7409308d076c33c681f810efd77e2b62e5107027cc98597/cupy-13.6.0.tar.gz", hash = "sha256:3cba30ae3dd32b5d5c6536e710cb98015227cd4ba83c46b3f1825a7ae55b6667", size = 3319720, upload-time = "2025-08-18T08:33:04.503Z" }
-
-[[package]]
 name = "cupy-cuda12x"
 version = "13.6.0"
 source = { registry = "https://pypi.org/simple" }
@@ -722,7 +712,6 @@ source = { editable = "." }
 dependencies = [
     { name = "biopython" },
     { name = "cuml-cu12" },
-    { name = "cupy" },
     { name = "einops" },
     { name = "hf-transfer" },
     { name = "ipykernel" },
@@ -737,7 +726,6 @@ dependencies = [
 requires-dist = [
     { name = "biopython", specifier = ">=1.83" },
     { name = "cuml-cu12", specifier = ">=25.10.0", index = "https://pypi.anaconda.org/rapidsai-wheels-nightly/simple" },
-    { name = "cupy", specifier = ">=13.6.0" },
     { name = "einops", specifier = ">=0.8.1" },
     { name = "hf-transfer", specifier = ">=0.1.9" },
     { name = "ipykernel", specifier = ">=7.1.0" },
