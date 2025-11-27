@@ -78,19 +78,24 @@ def load_embeddings(input_file: Path) -> Tuple[np.ndarray, np.ndarray]:
     return embeddings, ids
 
 
-def flatten_embeddings(embeddings: np.ndarray) -> np.ndarray:
+def flatten_embeddings(
+    embeddings: np.ndarray, use_mean_pooling: bool = False
+) -> np.ndarray:
     """
-    Flatten embeddings for PCA processing.
+    Flatten embeddings for PCA processing, optionally using mean pooling.
 
     Args:
         embeddings: Embeddings array. Can be:
             - 3D array with shape (batch_size, seq_len, dimension) for padded embeddings
             - Object array for variable-length embeddings
+        use_mean_pooling: If True, average over the seq_len dimension instead of flattening.
+            This reduces shape from (batch_size, seq_len, dimension) to (batch_size, dimension).
+            Defaults to False.
 
     Returns:
-        Flattened embeddings with shape (batch_size, features).
-        For padded: features = seq_len * dimension
-        For variable-length: each sequence is flattened individually
+        Processed embeddings with shape (batch_size, features).
+        If use_mean_pooling=True: features = dimension (mean pooled over seq_len)
+        If use_mean_pooling=False: features = seq_len * dimension (flattened)
 
     Raises:
         ValueError: If embeddings have unexpected shape.
@@ -98,45 +103,84 @@ def flatten_embeddings(embeddings: np.ndarray) -> np.ndarray:
     if len(embeddings.shape) == 3:
         # Padded embeddings: [batch_size, seq_len, dimension]
         num_sequences, seq_len, dimension = embeddings.shape
-        flattened = embeddings.reshape(num_sequences, seq_len * dimension)
-        logger.info(
-            f"Flattened padded embeddings from {embeddings.shape} to {flattened.shape}"
-        )
-        return flattened
+        
+        if use_mean_pooling:
+            # Mean pool over seq_len dimension: [batch_size, seq_len, dimension] -> [batch_size, dimension]
+            pooled = np.mean(embeddings, axis=1)
+            logger.info(
+                f"Mean pooled padded embeddings from {embeddings.shape} to {pooled.shape}"
+            )
+            return pooled
+        else:
+            # Flatten: [batch_size, seq_len, dimension] -> [batch_size, seq_len * dimension]
+            flattened = embeddings.reshape(num_sequences, seq_len * dimension)
+            logger.info(
+                f"Flattened padded embeddings from {embeddings.shape} to {flattened.shape}"
+            )
+            return flattened
 
     if embeddings.dtype == object:
         # Variable-length embeddings: object array
         logger.info("Processing variable-length embeddings...")
-        flattened_list = []
-        for i, emb in enumerate(embeddings):
-            if len(emb.shape) == 2:
-                # [seq_len, dimension] -> [seq_len * dimension]
-                flattened_list.append(emb.flatten())
-            elif len(emb.shape) == 1:
-                # Already flattened
-                flattened_list.append(emb)
-            else:
-                raise ValueError(
-                    f"Unexpected embedding shape at index {i}: {emb.shape}"
-                )
+        
+        if use_mean_pooling:
+            # Mean pool each sequence over its seq_len dimension
+            pooled_list = []
+            for i, emb in enumerate(embeddings):
+                if len(emb.shape) == 2:
+                    # [seq_len, dimension] -> [dimension] (mean over seq_len)
+                    pooled_list.append(np.mean(emb, axis=0))
+                elif len(emb.shape) == 1:
+                    # Already 1D, treat as single token embedding
+                    pooled_list.append(emb)
+                else:
+                    raise ValueError(
+                        f"Unexpected embedding shape at index {i}: {emb.shape}"
+                    )
+            
+            # Stack into array: all should have same dimension
+            pooled = np.array(pooled_list)
+            logger.info(
+                f"Mean pooled variable-length embeddings to shape {pooled.shape}"
+            )
+            return pooled
+        else:
+            # Original flattening behavior
+            flattened_list = []
+            for i, emb in enumerate(embeddings):
+                if len(emb.shape) == 2:
+                    # [seq_len, dimension] -> [seq_len * dimension]
+                    flattened_list.append(emb.flatten())
+                elif len(emb.shape) == 1:
+                    # Already flattened
+                    flattened_list.append(emb)
+                else:
+                    raise ValueError(
+                        f"Unexpected embedding shape at index {i}: {emb.shape}"
+                    )
 
-        # Find max length and pad to same length for PCA
-        max_len = max(len(emb) for emb in flattened_list)
-        dimension = flattened_list[0].shape[-1] if len(flattened_list[0].shape) > 0 else max_len
+            # Find max length and pad to same length for PCA
+            max_len = max(len(emb) for emb in flattened_list)
+            dimension = flattened_list[0].shape[-1] if len(flattened_list[0].shape) > 0 else max_len
 
-        # Pad all to same length
-        padded_flat = np.zeros((len(flattened_list), max_len), dtype=flattened_list[0].dtype)
-        for i, emb in enumerate(flattened_list):
-            padded_flat[i, : len(emb)] = emb
+            # Pad all to same length
+            padded_flat = np.zeros((len(flattened_list), max_len), dtype=flattened_list[0].dtype)
+            for i, emb in enumerate(flattened_list):
+                padded_flat[i, : len(emb)] = emb
 
-        logger.info(
-            f"Flattened and padded variable-length embeddings to shape {padded_flat.shape}"
-        )
-        return padded_flat
+            logger.info(
+                f"Flattened and padded variable-length embeddings to shape {padded_flat.shape}"
+            )
+            return padded_flat
 
     if len(embeddings.shape) == 2:
-        # Already 2D (already flattened)
+        # Already 2D (already flattened or mean pooled)
         logger.info(f"Embeddings already 2D: {embeddings.shape}")
+        if use_mean_pooling:
+            logger.warning(
+                "use_mean_pooling=True but embeddings are already 2D. "
+                "No pooling applied."
+            )
         return embeddings
 
     raise ValueError(f"Unexpected embeddings shape: {embeddings.shape}")
@@ -183,7 +227,7 @@ def reduce_dimensionality(
     embeddings_gpu = cp.asarray(embeddings.astype(np.float32))
 
     # Fit PCA and transform
-    pca = PCA(n_components=n_components, random_state=random_state)
+    pca = PCA(n_components=n_components) # NOTE: cuml uses deterministic SVD
     reduced_embeddings_gpu = pca.fit_transform(embeddings_gpu)
 
     # Convert back to numpy array
@@ -232,7 +276,11 @@ def save_reduced_embeddings(
 
 
 def reduce_embeddings_pca(
-    input_file: Path, output_file: Path, n_components: int = 512, random_state: int = 42
+    input_file: Path,
+    output_file: Path,
+    n_components: int = 512,
+    random_state: int = 42,
+    use_mean_pooling: bool = False,
 ) -> None:
     """
     Main function to reduce embedding dimensionality using PCA.
@@ -242,6 +290,9 @@ def reduce_embeddings_pca(
         output_file: Path to output .npz file for reduced embeddings.
         n_components: Number of PCA components. Defaults to 512.
         random_state: Random state for reproducibility. Defaults to 42.
+        use_mean_pooling: If True, average over the seq_len dimension before PCA.
+            This reduces memory usage and is useful when sequences are long.
+            Defaults to False.
 
     Raises:
         FileNotFoundError: If input file doesn't exist.
@@ -250,12 +301,12 @@ def reduce_embeddings_pca(
     # Load embeddings
     embeddings, ids = load_embeddings(input_file)
 
-    # Flatten embeddings
-    flattened_embeddings = flatten_embeddings(embeddings)
+    # Process embeddings (flatten or mean pool)
+    processed_embeddings = flatten_embeddings(embeddings, use_mean_pooling=use_mean_pooling)
 
     # Reduce dimensionality
     reduced_embeddings, pca_model = reduce_dimensionality(
-        flattened_embeddings, n_components=n_components, random_state=random_state
+        processed_embeddings, n_components=n_components, random_state=random_state
     )
 
     # Save reduced embeddings
@@ -293,6 +344,12 @@ def main() -> None:
         default=42,
         help="Random state for reproducibility (default: 42)",
     )
+    parser.add_argument(
+        "--use-mean-pooling",
+        action="store_true",
+        help="Average over sequence length dimension before PCA. "
+        "Reduces memory usage for long sequences.",
+    )
 
     args = parser.parse_args()
 
@@ -301,6 +358,7 @@ def main() -> None:
         output_file=args.output_file,
         n_components=args.n_components,
         random_state=args.random_state,
+        use_mean_pooling=args.use_mean_pooling,
     )
 
 
