@@ -16,6 +16,7 @@ dependencies = [
     "hf-transfer>=0.1.9",
     "ipykernel>=7.1.0",
     "numpy>=1.24.0",
+    "pytest>=9.0.1",
     "torch>=2.8.0",
     "torchvision>=0.23.0",
     "transformers>=4.56.2",
@@ -23,7 +24,7 @@ dependencies = [
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["model*", "retrieve_embeddings*"]
+include = ["model*", "retrieve_embeddings*", "pca*"]
 
 [tool.uv.sources]
 "cuml-cu12" = { index = "rapids" }
