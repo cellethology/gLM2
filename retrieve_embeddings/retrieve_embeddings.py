@@ -19,6 +19,7 @@ from typing import List, Optional, Tuple
 
 import numpy as np
 import torch
+from tqdm import tqdm
 from transformers import AutoModel, AutoTokenizer
 
 from retrieve_embeddings.util import read_fasta, save_embeddings_to_npz
@@ -147,7 +148,9 @@ def process_fasta_and_save_embeddings(
     """
     # Load model and tokenizer if not provided
     if model is None or tokenizer is None:
-        model, tokenizer = load_model_and_tokenizer(model_name=model_name, device=device)
+        model, tokenizer = load_model_and_tokenizer(
+            model_name=model_name, device=device
+        )
         device = next(model.parameters()).device
     elif device is None:
         device = next(model.parameters()).device
@@ -165,7 +168,11 @@ def process_fasta_and_save_embeddings(
     all_embeddings_list: List[torch.Tensor] = []
     all_ids: List[str] = []
 
-    for i in range(0, len(sequences), batch_size):
+    for i in tqdm(
+        range(0, len(sequences), batch_size),
+        desc="Extracting embeddings",
+        unit="batch",
+    ):
         batch_sequences = sequences[i : i + batch_size]
         batch_ids = sequence_ids[i : i + batch_size]
 
@@ -243,8 +250,7 @@ def process_fasta_and_save_embeddings(
         embeddings_array = np.array(embeddings_list, dtype=object)
 
         logger.info(
-            f"Saved {len(all_ids)} variable-length embeddings "
-            f"(hidden_dim={hidden_dim})"
+            f"Saved {len(all_ids)} variable-length embeddings (hidden_dim={hidden_dim})"
         )
 
         # Save variable-length embeddings
@@ -291,7 +297,6 @@ def main() -> None:
         action="store_true",
         help="Don't average embeddings across sequence length (keeps per-token embeddings)",
     )
-
 
     args = parser.parse_args()
 
