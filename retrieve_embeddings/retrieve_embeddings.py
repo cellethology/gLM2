@@ -1,42 +1,21 @@
-"""Core functions for retrieving embeddings from sequences.
+"""Retrieve gLM2 embeddings from FASTA sequences.
 
-Command-line usage:
-    # First, install the package in editable mode:
-    pip install -e .
-    
-    # Then use as a module:
-    python -m retrieve_embeddings.retrieve_embeddings ./retrieve_embeddings/test.fasta embeddings.npz
+CLI:
+    python -m retrieve_embeddings.retrieve_embeddings input.fasta embeddings.npz
+    python -m retrieve_embeddings.retrieve_embeddings input.fasta embeddings.npz --no-average
 
-    # With custom batch size
-    python -m retrieve_embeddings.retrieve_embeddings ./retrieve_embeddings/test.fasta embeddings.npz --batch-size 16
-
-    # Without padding (variable-length embeddings)
-    python -m retrieve_embeddings.retrieve_embeddings ./retrieve_embeddings/test.fasta embeddings.npz --no-pad
-
-    # Use specific device
-    python -m retrieve_embeddings.retrieve_embeddings ./retrieve_embeddings/test.fasta embeddings.npz --device cuda
-
-    # Use different model
-    python -m retrieve_embeddings.retrieve_embeddings ./retrieve_embeddings/test.fasta embeddings.npz --model-name tattabio/gLM2_150M
-
-    # Combine options
-    python -m retrieve_embeddings.retrieve_embeddings ./retrieve_embeddings/test.fasta embeddings.npz --batch-size 4 --no-pad --device cpu
-
-Python API usage:
-    >>> from pathlib import Path
-    >>> from retrieve_embeddings import process_fasta_and_save_embeddings
-    >>> 
-    >>> process_fasta_and_save_embeddings(
-    ...     fasta_path=Path("test.fasta"),
-    ...     output_path=Path("embeddings.npz"),
-    ...     batch_size=8,
-    ...     pad_embeddings=True
-    ... )
+Python API:
+    process_fasta_and_save_embeddings(
+        fasta_path,
+        output_path,
+        batch_size=1,
+        average_embeddings=True,
+    )
 """
 
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
 import torch
@@ -118,7 +97,8 @@ def get_embeddings_batch(
         device = next(model.parameters()).device
 
     # Tokenize all sequences
-    encodings = tokenizer(sequences, return_tensors="pt", padding=True)
+    padding = len(sequences) > 1
+    encodings = tokenizer(sequences, return_tensors="pt", padding=padding)
     input_ids = encodings.input_ids.to(device)
 
     # Extract embeddings
@@ -135,10 +115,10 @@ def process_fasta_and_save_embeddings(
     model: Optional[AutoModel] = None,
     tokenizer: Optional[AutoTokenizer] = None,
     model_name: str = "tattabio/gLM2_650M",
-    batch_size: int = 8,
+    batch_size: int = 1,
     device: Optional[str] = None,
     validate: bool = True,
-    pad_embeddings: bool = True,
+    average_embeddings: bool = True,
 ) -> None:
     """
     Process sequences from a FASTA file and save embeddings to .npz file.
@@ -149,20 +129,20 @@ def process_fasta_and_save_embeddings(
         model: Pre-loaded model. If None, will load from model_name.
         tokenizer: Pre-loaded tokenizer. If None, will load from model_name.
         model_name: HuggingFace model identifier. Only used if model/tokenizer are None.
-        batch_size: Number of sequences to process in each batch. Defaults to 8.
+        batch_size: Number of sequences to process in each batch. Defaults to 1.
         device: Device to run inference on. If None, auto-detects.
         validate: If True, validate sequences before processing. Invalid sequences will be
             skipped. Defaults to True.
-        pad_embeddings: If True, pad all embeddings to the same max length (shape will be
-            [batch_size, seq_len, dimension]). If False, keep variable-length embeddings
-            (saved as object array). Defaults to True.
+        average_embeddings: If True, average embeddings across the sequence length.
+            Outputs [batch_size, hidden_dim]. If False, saves variable-length per-token
+            embeddings (object array). Defaults to True.
 
     Example:
         >>> process_fasta_and_save_embeddings(
         ...     Path("sequences.fasta"),
         ...     Path("embeddings.npz"),
-        ...     batch_size=4,
-        ...     pad_embeddings=True
+        ...     batch_size=1,
+        ...     average_embeddings=True
         ... )
     """
     # Load model and tokenizer if not provided
@@ -179,13 +159,7 @@ def process_fasta_and_save_embeddings(
 
     logger.info(f"Processing {len(sequences)} sequences in batches of {batch_size}")
 
-    # Find global max length if padding is enabled
-    global_max_len = None
     hidden_dim = None
-    if pad_embeddings:
-        all_encodings = tokenizer(sequences, return_tensors="pt", padding=True)
-        global_max_len = all_encodings.input_ids.shape[1]
-        logger.info(f"Global max sequence length for padding: {global_max_len}")
 
     # Process in batches and collect embeddings
     all_embeddings_list: List[torch.Tensor] = []
@@ -212,64 +186,67 @@ def process_fasta_and_save_embeddings(
             hidden_dim = batch_embeddings.shape[2]
 
         # Process each sequence in the batch
-        encodings = tokenizer(batch_sequences, return_tensors="pt", padding=True)
-        attention_mask = encodings.attention_mask
+        padding = len(batch_sequences) > 1
+        encodings = tokenizer(batch_sequences, return_tensors="pt", padding=padding)
 
+        if average_embeddings:
+            if not padding:
+                pooled_embeddings = batch_embeddings.mean(dim=1)
+            else:
+                attention_mask = encodings.attention_mask.to(batch_embeddings.device)
+                mask = attention_mask.unsqueeze(-1)
+                lengths = mask.sum(dim=1).clamp_min(1)
+                pooled_embeddings = (batch_embeddings * mask).sum(dim=1) / lengths
+            all_embeddings_list.extend(pooled_embeddings)
+            all_ids.extend(batch_ids)
+            continue
+
+        if not padding:
+            all_embeddings_list.append(batch_embeddings[0])
+            all_ids.append(batch_ids[0])
+            continue
+
+        attention_mask = encodings.attention_mask.to(batch_embeddings.device)
         for j, seq_id in enumerate(batch_ids):
             seq_len = attention_mask[j].sum().item()
-            
-            if pad_embeddings:
-                # Pad to global max length
-                padded_emb = torch.zeros(
-                    (global_max_len, hidden_dim),
-                    dtype=batch_embeddings.dtype,
-                    device=batch_embeddings.device,
-                )
-                # Copy actual sequence (up to batch max length)
-                batch_max_len = batch_embeddings.shape[1]
-                actual_len = min(seq_len, batch_max_len)
-                padded_emb[:actual_len, :] = batch_embeddings[j, :actual_len, :]
-                all_embeddings_list.append(padded_emb)
-            else:
-                # Keep variable-length embeddings (remove padding)
-                all_embeddings_list.append(batch_embeddings[j, :seq_len, :])
-            
+            # Keep variable-length embeddings (remove padding)
+            all_embeddings_list.append(batch_embeddings[j, :seq_len, :])
             all_ids.append(seq_id)
 
     logger.info(f"Successfully processed {len(all_embeddings_list)} sequences")
 
     ids_array = np.array(all_ids)
 
-    if pad_embeddings:
-        # Stack all embeddings into a single array: [batch_size, seq_len, dimension]
-        # Convert bfloat16 to float32 for numpy compatibility
+    if average_embeddings:
         embeddings_array = torch.stack(all_embeddings_list).cpu().float().numpy()
-        
-        # Verify shape
+
         assert embeddings_array.shape == (
             len(all_ids),
-            global_max_len,
             hidden_dim,
         ), f"Unexpected embeddings shape: {embeddings_array.shape}"
 
         logger.info(
             f"Embeddings shape: {embeddings_array.shape} = [batch_size={len(all_ids)}, "
-            f"seq_len={global_max_len}, dimension={hidden_dim}]"
+            f"hidden_dim={hidden_dim}]"
         )
-        
-        # Save padded embeddings
-        save_embeddings_to_npz(embeddings_array, ids_array, output_path, padded=True)
+
+        save_embeddings_to_npz(
+            embeddings_array,
+            ids_array,
+            output_path,
+            pooled=True,
+        )
     else:
         # Convert to numpy and save as variable-length (object array)
         # Convert bfloat16 to float32 for numpy compatibility
         embeddings_list = [emb.cpu().float().numpy() for emb in all_embeddings_list]
         embeddings_array = np.array(embeddings_list, dtype=object)
-        
+
         logger.info(
             f"Saved {len(all_ids)} variable-length embeddings "
             f"(hidden_dim={hidden_dim})"
         )
-        
+
         # Save variable-length embeddings
         save_embeddings_to_npz(embeddings_array, ids_array, output_path, padded=False)
 
@@ -300,8 +277,8 @@ def main() -> None:
     parser.add_argument(
         "--batch-size",
         type=int,
-        default=8,
-        help="Batch size for processing (default: 8)",
+        default=1,
+        help="Batch size for processing (default: 1)",
     )
     parser.add_argument(
         "--device",
@@ -310,10 +287,11 @@ def main() -> None:
         help="Device to use ('cuda', 'cpu', or None for auto-detect)",
     )
     parser.add_argument(
-        "--no-pad",
+        "--no-average",
         action="store_true",
-        help="Don't pad embeddings to the same length (saves variable-length embeddings)",
+        help="Don't average embeddings across sequence length (keeps per-token embeddings)",
     )
+
 
     args = parser.parse_args()
 
@@ -324,10 +302,9 @@ def main() -> None:
         batch_size=args.batch_size,
         device=args.device,
         validate=True,  # Always validate sequences
-        pad_embeddings=not args.no_pad,
+        average_embeddings=not args.no_average,
     )
 
 
 if __name__ == "__main__":
     main()
-
