@@ -13,7 +13,6 @@ logger = logging.getLogger(__name__)
 
 # Validation constants
 MIN_SEQUENCE_LENGTH: int = 1
-MAX_SEQUENCE_LENGTH: int = 4096  # Model context length limit
 # Valid amino acid characters (uppercase, including ambiguous IUPAC extended code https://www.bioinformatics.org/sms/iupac.html) 
 VALID_AA_CHARS: Set[str] = set("ACDEFGHIKLMNPQRSTVWYBJOUXZ")
 # Valid nucleotide characters (lowercase, including ambiguous)
@@ -50,12 +49,6 @@ def validate_sequence(sequence: str, seq_id: str = "") -> Tuple[bool, str]:
     if seq_len < MIN_SEQUENCE_LENGTH:
         return False, (
             f"Sequence too short (length {seq_len}, minimum {MIN_SEQUENCE_LENGTH})"
-            f"{': ' + seq_id if seq_id else ''}"
-        )
-
-    if seq_len > MAX_SEQUENCE_LENGTH:
-        return False, (
-            f"Sequence too long (length {seq_len}, maximum {MAX_SEQUENCE_LENGTH})"
             f"{': ' + seq_id if seq_id else ''}"
         )
 
