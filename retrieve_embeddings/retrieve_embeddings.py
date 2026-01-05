@@ -306,7 +306,7 @@ def main() -> None:
         model_name=args.model_name,
         batch_size=args.batch_size,
         device=args.device,
-        validate=True,  # Always validate sequences
+        validate=False,
         average_embeddings=not args.no_average,
     )
 
