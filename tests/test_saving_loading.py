@@ -77,7 +77,7 @@ def test_embeddings_saved_with_actual_model_content() -> None:
             device="cpu",  # Use CPU for testing
             batch_size=2,
             validate=True,
-            pad_embeddings=True,  # Test with padded embeddings
+            average_embeddings=True,  # Test with mean pooled embeddings
         )
         
         # Load the saved embeddings
@@ -86,27 +86,29 @@ def test_embeddings_saved_with_actual_model_content() -> None:
         # Verify basic structure (test.fasta has 3 sequences)
         assert len(loaded_embeddings) == 3, f"Expected 3 embeddings, got {len(loaded_embeddings)}"
         assert len(loaded_ids) == 3, f"Expected 3 IDs, got {len(loaded_ids)}"
-        assert len(loaded_embeddings.shape) == 3, (
-            f"Expected 3D array [batch, seq_len, hidden_dim], got shape {loaded_embeddings.shape}"
+        assert len(loaded_embeddings.shape) == 2, (
+            f"Expected 2D array [batch, hidden_dim], got shape {loaded_embeddings.shape}"
         )
         
         # Verify embeddings contain actual content (not all zeros)
         for i, embedding in enumerate(loaded_embeddings):
+            assert embedding.ndim == 1, f"Embedding {i} should be 1D, got {embedding.ndim}D"
+
             # Check that embedding is not all zeros
             assert not np.allclose(embedding, 0.0), (
                 f"Embedding {i} should not be all zeros"
             )
-            
+
             # Check that embedding has non-zero variance (contains variation)
             assert np.var(embedding) > 1e-6, (
                 f"Embedding {i} should have non-zero variance, got {np.var(embedding)}"
             )
-            
+
             # Check that embedding values are reasonable (not NaN or Inf)
             assert np.all(np.isfinite(embedding)), (
                 f"Embedding {i} should contain only finite values"
             )
-            
+
             # Check that embedding has reasonable magnitude (not extremely large)
             assert np.abs(embedding).max() < 1e6, (
                 f"Embedding {i} should not have extremely large values, max={np.abs(embedding).max()}"
@@ -118,30 +120,16 @@ def test_embeddings_saved_with_actual_model_content() -> None:
         assert "seq3" in loaded_ids, f"Expected 'seq3' in IDs, got {loaded_ids}"
         
         # Verify embeddings have different content (sequences are different)
-        # The embeddings should be different for different sequences
         if loaded_embeddings.shape[0] >= 2:
             emb1 = loaded_embeddings[0]
             emb2 = loaded_embeddings[1]
-            # Remove padding (zeros at the end) for comparison
-            # Find actual sequence length by finding where embeddings become zero
-            non_zero_mask1 = np.any(emb1 != 0, axis=1)
-            non_zero_mask2 = np.any(emb2 != 0, axis=1)
-            
-            if np.any(non_zero_mask1) and np.any(non_zero_mask2):
-                actual_emb1 = emb1[non_zero_mask1]
-                actual_emb2 = emb2[non_zero_mask2]
-                # Embeddings should be different (unless sequences are identical)
-                # At minimum, they should have different shapes or different values
-                assert (
-                    actual_emb1.shape != actual_emb2.shape
-                    or not np.allclose(actual_emb1[: min(len(actual_emb1), len(actual_emb2))], 
-                                     actual_emb2[: min(len(actual_emb1), len(actual_emb2))])
-                ), "Embeddings from different sequences should be different"
+            assert not np.allclose(emb1, emb2), (
+                "Embeddings from different sequences should be different"
+            )
         
         # Verify embedding dimensions are reasonable
-        batch_size, seq_len, hidden_dim = loaded_embeddings.shape
+        batch_size, hidden_dim = loaded_embeddings.shape
         assert hidden_dim > 0, f"Hidden dimension should be positive, got {hidden_dim}"
-        assert seq_len > 0, f"Sequence length should be positive, got {seq_len}"
         assert batch_size == 3, f"Batch size should be 3, got {batch_size}"
         
     finally:
