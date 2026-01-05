@@ -42,6 +42,9 @@ def validate_sequence(sequence: str, seq_id: str = "") -> Tuple[bool, str]:
         >>> print(is_valid)
         True
     """
+    # Normalize whitespace to avoid false strand token errors from wrapped FASTA lines.
+    sequence = re.sub(r"\s+", "", sequence)
+
     if not sequence:
         return False, f"Empty sequence found{': ' + seq_id if seq_id else ''}"
 
