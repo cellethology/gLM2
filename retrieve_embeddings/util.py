@@ -181,18 +181,22 @@ def save_embeddings_to_npz(
     ids: np.ndarray,
     output_path: Path,
     padded: bool = True,
+    pooled: bool = False,
 ) -> None:
     """
     Save embeddings to a compressed .npz file.
 
     Args:
-        embeddings: Embeddings array. If padded=True, should have shape [batch_size, seq_len, dimension].
-            If padded=False, can be a list/array of variable-length embeddings.
+        embeddings: Embeddings array. If pooled=True, should have shape [batch_size, dimension].
+            If padded=True, should have shape [batch_size, seq_len, dimension]. If padded=False,
+            can be a list/array of variable-length embeddings.
         ids: Array of sequence IDs with length batch_size.
         output_path: Path to save the .npz file.
         padded: If True, embeddings are padded to the same length (3D array).
             If False, embeddings have variable lengths (will be saved as object array).
             Defaults to True.
+        pooled: If True, embeddings are averaged across sequence length (2D array).
+            Defaults to False.
 
     Raises:
         ValueError: If embeddings or ids are empty, or shapes don't match.
@@ -217,7 +221,24 @@ def save_embeddings_to_npz(
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    if padded:
+    if pooled:
+        if isinstance(embeddings, list):
+            embeddings_array = np.array(embeddings)
+        else:
+            embeddings_array = embeddings
+
+        if len(embeddings_array.shape) != 2:
+            raise ValueError(
+                f"Expected 2D embeddings array with shape [batch_size, dimension] "
+                f"when pooled=True, got shape {embeddings_array.shape}"
+            )
+
+        np.savez_compressed(str(output_path), ids=ids, embeddings=embeddings_array)
+        logger.info(
+            f"Successfully saved {len(ids)} pooled embeddings with shape {embeddings_array.shape} "
+            f"to {output_path}"
+        )
+    elif padded:
         # Padded embeddings: should be 3D array
         if len(embeddings.shape) != 3:
             raise ValueError(
@@ -240,4 +261,3 @@ def save_embeddings_to_npz(
         logger.info(
             f"Successfully saved {len(ids)} variable-length embeddings to {output_path}"
         )
-
