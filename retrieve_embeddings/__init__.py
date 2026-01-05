@@ -11,8 +11,8 @@ Core usage examples:
     process_fasta_and_save_embeddings(
         fasta_path="my_sequences.fasta",
         output_path="my_embeddings.npz",
-        batch_size=8,
-        pad_embeddings=True
+        batch_size=1,
+        average_embeddings=True
     )
 
 Utility functions are available in:
