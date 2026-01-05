@@ -5,6 +5,7 @@ gLM2 (Genomic Language Model 2) is a mixed-modality deep learning framework for 
 ## Overview
 
 The gLM2 framework provides tools to:
+
 - Extract embeddings from FASTA sequences using pre-trained gLM2 models (gLM2_650M, gLM2_150M, etc.)
 - Process sequences in batches for efficient inference
 - Reduce embedding dimensionality using GPU-accelerated PCA (cuML)
@@ -37,6 +38,7 @@ source .venv/bin/activate
 ```
 
 This will:
+
 - Create a virtual environment (`.venv/`)
 - Install all required dependencies including:
   - PyTorch and Transformers (for model inference)
@@ -81,9 +83,9 @@ python -m retrieve_embeddings.retrieve_embeddings \
     <path-to-input.fasta> \
     <path-to-output.npz> \
     --model-name tattabio/gLM2_650M \
-    --batch-size 8 \
+    --batch-size 1 \
     --device cuda \
-    --no-pad
+    --no-average
 ```
 
 #### Command-Line Arguments
@@ -92,32 +94,33 @@ python -m retrieve_embeddings.retrieve_embeddings \
 - `output_file` (positional, required): Path to output `.npz` file where embeddings will be saved
 - `--model-name` (optional): HuggingFace model identifier (default: `tattabio/gLM2_650M`)
   - Available models: `tattabio/gLM2_650M`, `tattabio/gLM2_150M`
-- `--batch-size` (optional): Batch size for processing sequences (default: 8)
+- `--batch-size` (optional): Batch size for processing sequences (default: 1)
 - `--device` (optional): Device to run inference on - `cuda`, `cpu`, or `auto` (default: `auto`)
-- `--no-pad` (optional): Keep variable-length embeddings instead of padding to same length
+- `--no-average` (optional): Keep per-token embeddings (default is mean pooled)
 - `--no-validate` (optional): Skip sequence validation (not recommended)
 
 #### Output Format
 
 The script outputs a compressed NumPy archive (`.npz`) file containing:
+
 - `ids`: Array of sequence IDs from the FASTA file
-- `embeddings`: 
-  - If padded (default): Array with shape `(num_sequences, max_seq_len, hidden_dim)`
-  - If variable-length (`--no-pad`): Object array of variable-length embeddings
+- `embeddings`:
+  - If mean pooled (default): Array with shape `(num_sequences, hidden_dim)`
+  - If per-token (`--no-average`): Object array of variable-length embeddings
 
 #### Example Commands
 
 ```bash
-# Extract embeddings with default settings (padded, GPU if available)
+# Extract embeddings with default settings (mean pooled, GPU if available)
 python -m retrieve_embeddings.retrieve_embeddings \
     test_files/test.fasta \
     embeddings.npz
 
-# Extract variable-length embeddings
+# Extract per-token embeddings
 python -m retrieve_embeddings.retrieve_embeddings \
     test_files/test.fasta \
     embeddings.npz \
-    --no-pad
+    --no-average
 
 # Use CPU and smaller batch size
 python -m retrieve_embeddings.retrieve_embeddings \
@@ -146,8 +149,8 @@ process_fasta_and_save_embeddings(
     fasta_path=Path("test_files/test.fasta"),
     output_path=Path("embeddings.npz"),
     model_name="tattabio/gLM2_650M",
-    batch_size=8,
-    pad_embeddings=True,
+    batch_size=1,
+    average_embeddings=True,
     device="cuda"
 )
 ```
@@ -185,6 +188,7 @@ python -m pca.pca \
 #### Supported Input Formats
 
 The PCA module supports:
+
 - **Padded embeddings**: 3D array `(batch_size, seq_len, dimension)` - automatically flattened
 - **Variable-length embeddings**: Object array of variable-length embeddings - each flattened individually
 
