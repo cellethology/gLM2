@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 # Validation constants
 MIN_SEQUENCE_LENGTH: int = 1
-# Valid amino acid characters (uppercase, including ambiguous IUPAC extended code https://www.bioinformatics.org/sms/iupac.html) 
+# Valid amino acid characters (uppercase, including ambiguous IUPAC extended code https://www.bioinformatics.org/sms/iupac.html)
 VALID_AA_CHARS: Set[str] = set("ACDEFGHIKLMNPQRSTVWYBJOUXZ")
 # Valid nucleotide characters (lowercase, including ambiguous)
 VALID_NUC_CHARS: Set[str] = set("atgcn")
@@ -73,8 +73,8 @@ def validate_sequence(sequence: str, seq_id: str = "") -> Tuple[bool, str]:
             f"{' in sequence: ' + seq_id if seq_id else ''}"
         )
 
-    # Validate case requirements: 
-    # Make sure that for characters A,G,N,T: 
+    # Validate case requirements:
+    # Make sure that for characters A,G,N,T:
     # - if uppercase, accepted as AA (valid)
     # - if lowercase, accepted as nucleotide (valid)
     # Ensure no lowercase amino acids (including a,g,n,t) and no uppercase nucleotides (including A,G,N,T)
@@ -110,7 +110,9 @@ def validate_sequence(sequence: str, seq_id: str = "") -> Tuple[bool, str]:
 
 
 def read_fasta(
-    file_path: Path, validate: bool = True
+    file_path: Path,
+    validate: bool = True,
+    numeric_ids_only: bool = True,
 ) -> List[Tuple[str, str]]:
     """
     Read sequences from a FASTA file using BioPython's SeqIO.
@@ -119,6 +121,9 @@ def read_fasta(
         file_path: Path to the FASTA file.
         validate: If True, validate each sequence using validate_sequence().
             Invalid sequences will be skipped with a warning. Defaults to True.
+        numeric_ids_only: If True, treat a line as a FASTA header only when the
+            identifier after '>' is all digits. This allows '>' characters inside
+            sequences without splitting records. Defaults to True.
 
     Returns:
         List of tuples containing (sequence_id, sequence) pairs.
@@ -140,30 +145,94 @@ def read_fasta(
     skipped_count = 0
 
     try:
-        for record in SeqIO.parse(str(file_path), "fasta"):
-            seq_id = record.id
-            sequence = str(record.seq)
+        if not numeric_ids_only:
+            for record in SeqIO.parse(str(file_path), "fasta"):
+                seq_id = record.id
+                sequence = str(record.seq)
 
-            if not sequence:
-                logger.warning(f"Sequence {seq_id} is empty, skipping")
-                skipped_count += 1
-                continue
-
-            # Validate sequence if requested
-            if validate:
-                is_valid, error_msg = validate_sequence(sequence, seq_id)
-                if not is_valid:
-                    logger.warning(f"Skipping invalid sequence {seq_id}: {error_msg}")
+                if not sequence:
+                    logger.warning(f"Sequence {seq_id} is empty, skipping")
                     skipped_count += 1
                     continue
 
-            sequences.append((seq_id, sequence))
+                # Validate sequence if requested
+                if validate:
+                    is_valid, error_msg = validate_sequence(sequence, seq_id)
+                    if not is_valid:
+                        logger.warning(
+                            f"Skipping invalid sequence {seq_id}: {error_msg}"
+                        )
+                        skipped_count += 1
+                        continue
+
+                sequences.append((seq_id, sequence))
+        else:
+            current_id = None
+            current_seq_parts: List[str] = []
+
+            def strip_whitespace(value: str) -> str:
+                return re.sub(r"\s+", "", value)
+
+            def is_numeric_header(value: str) -> bool:
+                header_payload = value[1:].strip()
+                if not header_payload:
+                    return False
+                return header_payload.split()[0].isdigit()
+
+            def flush_current() -> None:
+                nonlocal skipped_count
+                if current_id is None:
+                    return
+                sequence = "".join(current_seq_parts)
+                if not sequence:
+                    logger.warning(f"Sequence {current_id} is empty, skipping")
+                    skipped_count += 1
+                    return
+                if validate:
+                    is_valid, error_msg = validate_sequence(sequence, current_id)
+                    if not is_valid:
+                        logger.warning(
+                            f"Skipping invalid sequence {current_id}: {error_msg}"
+                        )
+                        skipped_count += 1
+                        return
+                sequences.append((current_id, sequence))
+
+            with open(file_path, "r", encoding="utf-8") as handle:
+                for raw_line in handle:
+                    line = raw_line.rstrip("\n\r")
+                    if not line:
+                        continue
+
+                    if line.startswith(">"):
+                        if is_numeric_header(line):
+                            flush_current()
+                            header_payload = line[1:].strip()
+                            current_id = header_payload.split()[0]
+                            current_seq_parts = []
+                        else:
+                            if current_id is None:
+                                raise ValueError(
+                                    f"FASTA file does not start with a numeric header: {file_path}"
+                                )
+                            current_seq_parts.append(strip_whitespace(line))
+                        continue
+
+                    if current_id is None:
+                        raise ValueError(
+                            f"FASTA file does not start with a header line: {file_path}"
+                        )
+                    current_seq_parts.append(strip_whitespace(line))
+
+            flush_current()
 
     except Exception as e:
         raise ValueError(f"Error parsing FASTA file {file_path}: {e}") from e
 
     if not sequences:
-        raise ValueError(f"FASTA file is empty or all sequences were invalid: {file_path}")
+        raise ValueError(
+            f"FASTA file is empty or all sequences were invalid: {file_path}"
+        )
 
     if skipped_count > 0:
         logger.info(f"Skipped {skipped_count} invalid or empty sequences")
@@ -252,7 +321,7 @@ def save_embeddings_to_npz(
             embeddings_array = np.array(embeddings, dtype=object)
         else:
             embeddings_array = embeddings
-        
+
         np.savez_compressed(str(output_path), ids=ids, embeddings=embeddings_array)
         logger.info(
             f"Successfully saved {len(ids)} variable-length embeddings to {output_path}"
