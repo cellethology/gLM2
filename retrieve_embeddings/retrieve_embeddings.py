@@ -2,7 +2,6 @@
 
 CLI:
     python -m retrieve_embeddings.retrieve_embeddings input.fasta embeddings.npz
-    python -m retrieve_embeddings.retrieve_embeddings input.fasta embeddings.npz --no-average
 
 Python API:
     process_fasta_and_save_embeddings(
@@ -119,6 +118,7 @@ def process_fasta_and_save_embeddings(
     batch_size: int = 1,
     device: Optional[str] = None,
     validate: bool = True,
+    numeric_ids_only: bool = True,
     average_embeddings: bool = True,
 ) -> None:
     """
@@ -134,7 +134,9 @@ def process_fasta_and_save_embeddings(
         device: Device to run inference on. If None, auto-detects.
         validate: If True, validate sequences before processing. Invalid sequences will be
             skipped. Defaults to True.
-        average_embeddings: If True, average embeddings across the sequence length.
+        numeric_ids_only: If True, treat only numeric headers as FASTA IDs and allow
+            other '>' characters inside sequences. Defaults to True.
+        average_embeddings: If True, mean-pool embeddings across the sequence length.
             Outputs [batch_size, hidden_dim]. If False, saves variable-length per-token
             embeddings (object array). Defaults to True.
 
@@ -156,7 +158,11 @@ def process_fasta_and_save_embeddings(
         device = next(model.parameters()).device
 
     # Read sequences from FASTA
-    sequences_data = read_fasta(fasta_path, validate=validate)
+    sequences_data = read_fasta(
+        fasta_path,
+        validate=validate,
+        numeric_ids_only=numeric_ids_only,
+    )
     sequence_ids = [seq_id for seq_id, _ in sequences_data]
     sequences = [seq for _, seq in sequences_data]
 
@@ -293,10 +299,12 @@ def main() -> None:
         help="Device to use ('cuda', 'cpu', or None for auto-detect)",
     )
     parser.add_argument(
-        "--no-average",
-        action="store_true",
-        help="Don't average embeddings across sequence length (keeps per-token embeddings)",
+        "--allow-non-numeric-ids",
+        dest="numeric_ids_only",
+        action="store_false",
+        help="Treat any FASTA header as an ID (BioPython-style)",
     )
+    parser.set_defaults(numeric_ids_only=True)
 
     args = parser.parse_args()
 
@@ -306,8 +314,9 @@ def main() -> None:
         model_name=args.model_name,
         batch_size=args.batch_size,
         device=args.device,
-        validate=False,
-        average_embeddings=not args.no_average,
+        validate=True,
+        numeric_ids_only=args.numeric_ids_only,
+        average_embeddings=True,
     )
 
 
