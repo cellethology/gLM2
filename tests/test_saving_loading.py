@@ -30,7 +30,11 @@ def test_read_fasta_loads_sequences_correctly() -> None:
 
     try:
         # Load the FASTA file
-        sequences = read_fasta(temp_fasta_path, validate=False)
+        sequences = read_fasta(
+            temp_fasta_path,
+            validate=False,
+            numeric_ids_only=False,
+        )
 
         # Verify we got the expected number of sequences
         assert len(sequences) == 3, f"Expected 3 sequences, got {len(sequences)}"
@@ -77,6 +81,7 @@ def test_embeddings_saved_with_actual_model_content() -> None:
             device="cpu",  # Use CPU for testing
             batch_size=2,
             validate=True,
+            numeric_ids_only=False,
             average_embeddings=True,  # Test with mean pooled embeddings
         )
         
